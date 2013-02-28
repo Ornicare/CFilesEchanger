@@ -1,0 +1,6 @@
+PWD : afficher dossier courant
+CDUP : cd ..
+CWD dossier => aller dans dossier.
+
+TODO : CWD
+Bug : si GET fichier pas déjà prrésent, freeze.
