@@ -10,6 +10,7 @@
 //pour pwd()
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #include "serveur_functions_manager.h"
 #include "md5manager.h"
@@ -20,6 +21,8 @@
 #define PACKET_SIZE 1 //pas plus, ça passe pas
 #define DEBUG 1
 
+pthread_rwlock_t rwlock;
+
 /**************************************/
 
 /*
@@ -27,29 +30,43 @@
  */
 void *talker( void *d ) {
 
+	printf("&&&&&&&&&&&&&&&&&&&&&%i\n",pthread_self());
 
+	//static __thread int p = 10;
 	
-
+	//__thread int iqssqqqs = 42;
 	char buffer[256];
 	char temp[256];
 	//
 	int longueur;
-	int sock;
-	
+	//int sock;
+	//printf("@@@@@@@@@@@@@@@@@@%i\n", p);
 	
 	
 	char asciiCode[2]="1";
 
-	sock = (int)d; //bah, faut bien récupérer l'id du socket... on cast void* en int...
+	tls_sock = (int)d; //bah, faut bien récupérer l'id du socket... on cast void* en int...
 	
-	currentPaths[sock] = pgetcwd(); //initialisation du chemin courant.
+	strncpy(currentPath,pgetcwd(),strlen(pgetcwd())); //initialisation du chemin courant.
+	
+	if(strlen(currentPath)>1 && currentPath[strlen(currentPath)-1]!='/')
+	{
+		strcat(currentPath,"/\0");	
+	}
 
 	while(1)
 	{
-		printf("[%i]Attente d'un message.\n",sock);
+		printf("[%i]Attente d'un message.\n",tls_sock);
 		//do
 		//{
-			longueur = read(sock, buffer, sizeof(buffer)); printf("READ : @%s@%d\n",buffer,buffer[0]);
+			//sleep(30);
+			
+			//printf("%i@@@@@@@@@@@@@@@@@@%s\n",sock,tls_i);
+			longueur = read(tls_sock, buffer, sizeof(buffer)); printf("READ : @%s@%d\n",buffer,buffer[0]);
+			
+			//tls_i = buffer[0];
+			//strncpy(tls_i,buffer,strlen(buffer));
+			
 			//sprintf(asciiCode,"%d",buffer[0]);
 		//} while(strcmp(asciiCode,"0")==0);
 		//buffer[longueur] = '\0';
@@ -57,39 +74,40 @@ void *talker( void *d ) {
 		//{
 			if(longueur <= 0) return;  //si la lecture échoue, on annule tout.
 		
-			write(sock, "RECEIVED\0",9);  if(DEBUG) printf("WRITE : %s\n","RECEIVED\0");
+			write(tls_sock, "RECEIVED\0",9);  if(DEBUG) printf("WRITE : %s\n","RECEIVED\0");
 		
 			//
-			read(sock, temp, sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
+			read(tls_sock, temp, sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
 		
 		
 		
-			if(parseCommand(buffer, sizeof(buffer), sock))
+			if(parseCommand(buffer, sizeof(buffer)))
 			{
-				printf("[%i]Une erreur est survenue, fermeture du socket.\n",sock);	
+				printf("[%i]Une erreur est survenue, fermeture du socket.\n",tls_sock);	
 				break;
 			}
 			else
 			{
 				//printf("%s\n", buffer);
 				//printf("[%i]Commande réussie : %s\n",sock,buffer);
-				write(sock, "ENDSTREAM\0", 10); if(DEBUG) printf("WRITE : %s\n","ENDSTREAM\0");
+				write(tls_sock, "ENDSTREAM\0", 10); if(DEBUG) printf("WRITE : %s\n","ENDSTREAM\0");
 			}
 		//}
 	}
 
-	close(sock); //on ferme le socket.
+	close(tls_sock); //on ferme le socket.
 }
 
 /*
  * Fonction d'analyse du message envoyé par le client.
  */
-int parseCommand(char* BUFFER, int BUFFER_LENGTH, int sock) { //     /!\utiliser fork ou mutex
+int parseCommand(char* BUFFER, int BUFFER_LENGTH) { //     /!\utiliser fork ou mutex
 	
 	/*
 	 * Préformatage des chaines.
 	 */
 	int k=0;
+	//printf("%i@@@@@@@@@@@@@@@@@@%s\n",sock,tls_i);
 	while(BUFFER[k]!=' ')
 	{
 		k++;
@@ -101,15 +119,15 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH, int sock) { //     /!\utiliser
 	
 	if(strcmp(BUFFER,"LIST")==0) //Liste le répertoire courant.
 	{
-		list(sock);
+		list();
 	}
 	else if(strcmp(BUFFER,"PWD")==0) //récupère le répertoire courant.
 	{
-		pwd(sock);
+		pwd();
 	}
 	else if(strcmp(BUFFER,"STOP")==0) //si le message envoyé est "STOP", on quitte tout.
 	{
-		stop(sock);
+		stop();
 	}
 	else if(strcmp(BUFFER,"GET")==0) 
 	{
@@ -121,7 +139,7 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH, int sock) { //     /!\utiliser
 			k++;
 		}
 		argument[k-temp_k]='\0';
-		uploadManager(sock, argument);
+		uploadManager(argument);
 	}
 	else if(strcmp(BUFFER,"CDDOWN")==0) 
 	{
@@ -133,24 +151,37 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH, int sock) { //     /!\utiliser
 			k++;
 		}
 		argument[k-temp_k]='\0';
-		cdDown(sock, argument);
+		cdDown(argument);
 	}
 	else if(strcmp(BUFFER,"CDUP")==0) 
 	{
-		cdUp(sock);
+		cdUp();
+	}
+	else if(strcmp(BUFFER,"HELP")==0) 
+	{
+		help();
 	}
 	return 0;
 }
 
-int cdDown(int sock,char* argument)
+int help()
+{
+	char * help = "CDUP: go to the parent directory\nCDDOWN <directory>: go to <directory>\nPWD: get the current directory\nLIST: get files and directories in the current directory\nGET <file>: try to download <file>\n";
+	write(tls_sock,help, strlen(help));
+	waitingForClientMessage("CONTINUE");
+	return 0;
+}
+
+int cdDown(char* argument)
 {
 	char testPath[255];
-	strncpy(testPath,currentPaths[sock],strlen(currentPaths[sock]));
-	testPath[strlen(currentPaths[sock])]='\0';
+	strncpy(testPath,currentPath,strlen(currentPath));
+	testPath[strlen(currentPath)]='\0';
 	
 	//Rajouter un / à la fin s'il n'y est pas
-	if(argument[strlen(argument)-1]!='/')
+	if(strlen(argument)>1 && argument[strlen(argument)-1]!='/')
 	{
+		printf("DEBUG : %c\n",argument[strlen(argument)-1]);
 		strcat(argument,"/\0");	
 	}
 	
@@ -158,32 +189,33 @@ int cdDown(int sock,char* argument)
 	//strcat(testPath,currentPath);
 	strcat(testPath,argument);
 	printf("DEBUG : %s\n",testPath);
-	if(dir_exists(testPath)) strncpy(currentPaths[sock],testPath,strlen(testPath));
-	
-	write(sock,currentPaths[sock],strlen(currentPaths[sock]));
-	if(waitingForClientMessage(sock,"CONTINUE")) return 1;
+	printf("DEBUG : %s\n",currentPath);
+	if(dir_exists(testPath)) strncpy(currentPath,testPath,strlen(testPath));
+	printf("DEBUG : %s\n",currentPath);
+	write(tls_sock,currentPath,strlen(currentPath));
+	if(waitingForClientMessage("CONTINUE")) return 1;
 	
 	//chdir(currentPath);
 	return 0;
 }
 
-int cdUp(int sock)
+int cdUp()
 {
-	if(strcmp(currentPaths[sock],"/")==0) return 0; //on est déjà à la racine.
-	char buffer[strlen(currentPaths[sock])+1];
-	strncpy(buffer, currentPaths[sock], strlen(currentPaths[sock]));
-	int k=strlen(currentPaths[sock])-1;
+	if(strcmp(currentPath,"/")==0) return 0; //on est déjà à la racine.
+	char buffer[strlen(currentPath)+1];
+	strncpy(buffer, currentPath, strlen(currentPath));
+	int k=strlen(currentPath)-1;
 	do
 	{
 		buffer[k]='\0';
 		k--;
 	} while(buffer[k]!='/');
-	buffer[strlen(currentPaths[sock])]='\0';
-	strncpy(currentPaths[sock],buffer,sizeof(buffer));
-	write(sock,buffer,sizeof(buffer));
-	if(waitingForClientMessage(sock,"CONTINUE")) return 1;
+	buffer[strlen(currentPath)]='\0';
+	strncpy(currentPath,buffer,sizeof(buffer));
+	write(tls_sock,buffer,sizeof(buffer));
+	if(waitingForClientMessage("CONTINUE")) return 1;
 	
-	printf("@%s@\n",currentPaths[sock]);
+	printf("@%s@\n",currentPath);
 	//chdir(currentPath); //choisit le dossier courant.
 	return 0;
 }
@@ -191,22 +223,22 @@ int cdUp(int sock)
 /*
  * Liste les fichiers et dossiers du répertoire courant (chdir()=>choisir ce répertoire)
  */
-void list(int sock) {
+void list() {
 	struct dirent *lecture;
 	DIR *rep;
 	printf("qdsqdsq\n");
-	rep = opendir(currentPaths[sock]);
-	printf("%s",currentPaths[sock]);
-	write(sock,"\n**Dossiers : \n\0",16);
-	waitingForClientMessage(sock,"CONTINUE");
+	rep = opendir(currentPath);
+	printf("%s",currentPath);
+	write(tls_sock,"\n**Dossiers : \n\0",16);
+	waitingForClientMessage("CONTINUE");
 	printf("**Dossiers : \n");
-	listByType(sock,DT_DIR,rep);
+	listByType(DT_DIR,rep);
 	
-	rep = opendir(currentPaths[sock] );
-	write(sock,"\n**Fichiers : \n\0",16);
-	waitingForClientMessage(sock,"CONTINUE");
+	rep = opendir(currentPath );
+	write(tls_sock,"\n**Fichiers : \n\0",16);
+	waitingForClientMessage("CONTINUE");
 	printf("**Fichiers : \n");
-	listByType(sock,DT_REG,rep);
+	listByType(DT_REG,rep);
 }
 
 /*
@@ -220,7 +252,7 @@ void list(int sock) {
  *      DT_SOCK     This is a UNIX domain socket.
  *      DT_UNKNOWN  The file type is unknown
  */
-void listByType(int sock, int type, DIR* rep) {
+void listByType(int type, DIR* rep) {
 	char buffer[256];
 	struct dirent *lecture;
 	while ((lecture = readdir(rep))) {
@@ -230,9 +262,9 @@ void listByType(int sock, int type, DIR* rep) {
 		 	{
 		 		strncpy(buffer,lecture->d_name,strlen(lecture->d_name));
 		 		buffer[strlen(lecture->d_name)]='\0';
-		    		write(sock,buffer,strlen(lecture->d_name)+1);
+		    		write(tls_sock,buffer,strlen(lecture->d_name)+1);
 				printf("%s\n", lecture->d_name, lecture->d_type);
-				waitingForClientMessage(sock,"CONTINUE");
+				waitingForClientMessage("CONTINUE");
 		 	}
 	      	}
 	}
@@ -242,9 +274,9 @@ void listByType(int sock, int type, DIR* rep) {
 /*
  * Renvoie le répertoire courant à l'utilisateur.
  */
-void pwd(int sock) {
-	write(sock, currentPaths[sock], strlen(currentPaths[sock]));
-	waitingForClientMessage(sock,"CONTINUE");
+void pwd() {
+	write(tls_sock, currentPath, strlen(currentPath));
+	waitingForClientMessage("CONTINUE");
 }
 
 
@@ -281,13 +313,14 @@ char* pgetcwd(void)
 /*
  * Attention aux priorités à droite.
  */
-void stop(int sock) {
-	printf("[%i]Fermeture du serveur.\n",sock);
-	char* message = "Fermeture du serveur...\n";
-	write(sock,message,strlen(message)); printf("WRITE : %s\n",message);
-	close(sock);
-	close(socket_descriptor);
-	exit(1);
+void stop() {
+	printf("[%i]Fermeture du lien serveur-client.\n",tls_sock);
+	char* message = "Fermeture du lien serveur-client...\0";
+	//write(sock,message,strlen(message)); printf("WRITE : %s\n",message);
+	close(tls_sock);
+	pthread_exit();
+	//close(socket_descriptor);
+	//exit(1);
 }
 
 /*
@@ -303,26 +336,43 @@ int min(int a, int b)
 /*
  * Cette fonction parsera le GET et essayera d'envoyer le fichier à l'utilisateur.
  */
-int uploadManager(int sock, char* argument)
+int uploadManager(char* argument)
 {
+	//Attention variable conservée entre deux appels ! (D'où le memset)
 	char filePath[1024];
-	strncpy(filePath,currentPaths[sock],strlen(currentPaths[sock]));
+	memset( filePath, '\0', sizeof(filePath));
+	
+	strncpy(filePath,currentPath,strlen(currentPath));
 	strcat(filePath,argument);
-	if(!file_exists(filePath))
-	{	
-		write(sock,"ERR:FILE_NOT_EXISTS\0",20);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_NOT_EXISTS\0",filePath);
-		char temp[256];
-		read(sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n","temp");
+	
+	//Attention get lock avant le file_exist (fait sauter le lock)
+	printf("@@@@@@@@@@@@@@@@@@@@%i\n",getLock(filePath));
+	if(getLock(filePath))
+	{
+		write(tls_sock,"ERR:FILE_ALREADY_IN_USE\0",24);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_ALREADY_IN_USE\0",filePath);
 		return 1;
 	}
 	
-	write(sock,"FILE_EXIST\0",11);  if(DEBUG) printf("WRITE : %s\n","FILE_EXIST\0");
+	if(!file_exists(filePath))
+	{	
+		write(tls_sock,"ERR:FILE_NOT_EXISTS\0",20);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_NOT_EXISTS\0",filePath);
+		char temp[256];
+		read(tls_sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n","temp");
+		return 1;
+	}
+	
+
+	
+	
+	//setLock(filePath);
+	//printf("@@@@@@@@@@@@@@@@@@@@%i\n",getLock(filePath));
+	write(tls_sock,"FILE_EXIST\0",11);  if(DEBUG) printf("WRITE : %s\n","FILE_EXIST\0");
 	
 	//char temp[256];
 	//read(sock,temp,sizeof(temp));
 	
 	printf("Début de l'upload\n");
-	if(upload(filePath, sock)) return 1;
+	if(upload(filePath)) return 1;
 	return 0;
 	
 }
@@ -344,7 +394,7 @@ int uploadManager(int sock, char* argument)
  *		}
  *		while(!read("CONTINUE")) //tant que le client n'a pas reçu le paquet correctement (vérification via son CRC), le serveur lui renvoie. 
  */
-int upload(char* fichier, int socket)
+int upload(char* fichier)
 {
 	//Initialisation du crc
 	crcInit();
@@ -363,6 +413,12 @@ int upload(char* fichier, int socket)
 	 * Déclarations
 	 */
 	FILE *fs = fopen(fichier, "rb"); //Le fichier à envoyer. //rb ouverture du fichier en lecture binaire
+	
+	//remettre le lock
+	printf("0=Lock placé : %i\n",setLock(fichier));
+	
+	//int result = flock(fileno(fs), 2);
+	//printf("Lock : %i\n", result);
 	int octet_envoye; //Pour vérifier que l'envoi s'est bien fait.
 	int taille_fichier;
 	unsigned char *buffer; //Le paquet qui va être envoyé
@@ -401,19 +457,19 @@ int upload(char* fichier, int socket)
 	sprintf(tailleFichier, "%i", taille_fichier);
 	
 	//On attend START de la part du client.
-	if(waitingForClientMessage(socket,"START")) return 1;
+	if(waitingForClientMessage("START")) return 1;
 	
 	//envoi de la taille du fichier au client
-	write(socket, tailleFichier, sizeof(tailleFichier)); if(DEBUG) printf("WRITE : %s\n",tailleFichier);
+	write(tls_sock, tailleFichier, sizeof(tailleFichier)); if(DEBUG) printf("WRITE : %s\n",tailleFichier);
 
 	//réception de CONTINUE.
-	if(waitingForClientMessage(socket,"CONTINUE")) return 1;
+	if(waitingForClientMessage("CONTINUE")) return 1;
 	//envoi du md5 du fichier
 	
 	getMD5checkSum(fichier, bufferT); //md5 du fichier envoyé.
-	write(socket, bufferT, sizeof(bufferT));  if(DEBUG) printf("WRITE : %s\n",bufferT);
+	write(tls_sock, bufferT, sizeof(bufferT));  if(DEBUG) printf("WRITE : %s\n",bufferT);
 
-	if(waitingForClientMessage(socket,"CONTINUE")) return 1;
+	if(waitingForClientMessage("CONTINUE")) return 1;
 	
 
 	printf("__________________________________________________\n");
@@ -425,19 +481,19 @@ int upload(char* fichier, int socket)
 		fread(morceaufichier,PACKET_SIZE,1,fs); //lecture du bloc de fichier.
 		
 		 
-		morceaufichier[current_paquet_size]='\0'; //au cas où...
+		//morceaufichier[current_paquet_size]='\0'; //au cas où...
 		//buffer[4]='\0';
 		//printf("%s\n",buffer);
 		//calcul du crc du morceau de fichier.	
-		sprintf(buffer, "%X", crcFast(morceaufichier, min(PACKET_SIZE,taille_fichier-taille_lue))); //mettre le crc au début du paquet.
+		//sprintf(buffer, "%X", crcFast(morceaufichier, min(PACKET_SIZE,taille_fichier-taille_lue))); //mettre le crc au début du paquet.
 		
 		//On met le moreceau de fichier dans le buffer.
-		for(k = 0;k<(PACKET_SIZE);k++)
+		/*for(k = 0;k<(PACKET_SIZE);k++)
 		{
 			buffer[4+k]=morceaufichier[k];
 		}
 		buffer[PACKET_SIZE+5]='\0';
-		
+		*/
 		
 		/*
 		 * Pour les tests
@@ -465,7 +521,7 @@ int upload(char* fichier, int socket)
 		//do {
 			//printf("@@@@@@@@@@@%s@@@@@@@@@@\n",buffer);
 			
-			octet_envoye=write(socket, buffer, min(PACKET_SIZE+1+5,taille_fichier-taille_lue+6));
+			octet_envoye=write(tls_sock, morceaufichier, min(PACKET_SIZE,taille_fichier-taille_lue));
 			
 			//code de test
 			/*buffer[old_char_index]=old_char;*/
@@ -500,6 +556,9 @@ int upload(char* fichier, int socket)
 	printf("\n"); //(Juste pour terminer la progress bar)
 	free(morceaufichier);
 	free(buffer);
+	
+	//unlock the file
+	unLock(fichier);
 
 	return 0;
 }
@@ -507,10 +566,10 @@ int upload(char* fichier, int socket)
 /*
  * Attend le message 'commande' de la part du client, annule l'upload si reçoit autre chose.
  */
-int waitingForClientMessage(int socket,char* commande)
+int waitingForClientMessage(char* commande)
 {
 	char commandReader[10];
-	read(socket, commandReader, sizeof(commandReader)); if(DEBUG) printf("READ : %s\n",commandReader);
+	read(tls_sock, commandReader, sizeof(commandReader)); if(DEBUG) printf("READ : %s\n",commandReader);
 	if(strcmp(commandReader,commande)!=0)
 	{
 		printf("Erreur protocolaire\n");
@@ -555,5 +614,61 @@ int dir_exists(char * dirpath)
 	return 1;
 }
 
+int getLock(char * filePath) //0 : unlock, 1 : lock ou erreur
+{
+	/* l_type   l_whence  l_start  l_len  l_pid   */
+	struct flock fl = {F_WRLCK, SEEK_SET,   0,      0,     0 };
+	int fd;
+	fl.l_pid =getpid();
+	if ((fd = open(filePath, O_RDWR)) == -1) {
+		perror("open");
+		return 1;
+	}
+	if (fcntl(fd, F_GETLK, &fl) == -1) {
+		perror("fcntl");
+		return 1;
+	}
+	close(fd);
+	if(fl.l_type==F_UNLCK)
+	{
+		return 0;
+	}
+	
+	return 1;
+}
 
 
+
+int setLock(char * filePath)// 0 : success, 1 : error
+{
+	if(getLock(filePath)) return 1;
+	struct flock fl = {F_RDLCK, SEEK_SET,   0,      0,     0 };
+	int fd;
+	fl.l_pid = getpid();
+	if ((fd = open(filePath, O_RDWR)) == -1) {
+		perror("open");
+		return 1;
+	}
+	if (fcntl(fd, F_SETLKW, &fl) == -1) {
+		perror("fcntl");
+		return 1;
+	}
+	return 0;
+}
+
+int unLock(char * filePath)
+{
+	if(!getLock(filePath)) return 1; //the file is already unlocked
+	struct flock fl = {F_UNLCK, SEEK_SET,   0,      0,     0 };
+	int fd;
+	if ((fd = open(filePath, O_RDWR)) == -1) {
+		perror("open");
+		return 1;
+	}
+	fl.l_pid =getpid();
+	if (fcntl(fd, F_SETLK, &fl) == -1) {
+		perror("fcntl");
+		return 1;
+	}
+    	return 0;
+}

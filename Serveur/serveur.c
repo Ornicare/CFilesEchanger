@@ -28,6 +28,7 @@ typedef struct servent servent;
 /**************************************/
 //int static socket_descriptor;
 
+pthread_key_t tlsKey = 0;
 
 /**************************************/
 
@@ -40,6 +41,10 @@ typedef struct servent servent;
 
 int main(int argc, char** argv)
 {
+
+
+
+  
 	int port; //Le port qui va être utilisé.
 	int nouv_socket_descriptor,
 	longeur_adresse_courante;

@@ -79,6 +79,7 @@ int main(int argc, char** argv)
 	
 	printf("envoi d'un message au serveur \n");
 
+	printf("Notice : commands are all in UPPERCASE. type \"HELP\" to get some help\n");
 
 
 	/*
@@ -90,9 +91,13 @@ int main(int argc, char** argv)
 	{
 		printf("Entrez votre commande\n");
 		//if ( scanf ( "%255s", message ) == 1 ) //scanf arrête la lecture au premier char d'espacement........
-		if(fgets(message, sizeof(message), stdin)!=NULL);
+		if(fgets(message, sizeof(message), stdin)!=NULL)
  		{	
  			message[strlen(message)-1]='\0'; //Pour remplacer le \r par un \0
+ 			
+ 			
+ 			
+ 			//printf("%i @%s@\n",strcmp(message,"STOP"),message);
  			
  			/*char * lf = strchr(message, '\n'); // On cherche le caractere '\n'. 
         		if (lf != NULL) // S'il est present, ... 

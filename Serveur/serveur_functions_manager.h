@@ -1,21 +1,30 @@
-int parseCommand(char* BUFFER, int BUFFER_LENGTH, int sock);
-int cdDown(int sock,char* argument);
-void list(int sock);
-void pwd(int sock);
+int parseCommand(char* BUFFER, int BUFFER_LENGTH);
+int help();
+int cdDown(char* argument);
+void list();
+void pwd();
+//void cdUp();
 char* pgetcwd(void); //Récupère le dossier courant (dans lequel le pgrm est lancé).
-void stop(int sock);
-int upload(char* fichier, int socket);
+void stop();
+int upload(char* fichier);
 int min(int a, int b);
-int uploadManager(int sock, char* argument);
+int uploadManager(char* argument);
 void *talker( void *d );
-int waitingForClientMessage(int socket,char* commande);
-void listByType(int sock, int type, DIR* rep);
+int waitingForClientMessage(char* commande);
+void listByType(int type, DIR* rep);
 int file_exists(char * filename);
 int dir_exists(char * dirpath);
+int getLock(char * filePath);
+int setLock(char * filePath);
+int unLock(char * filePath);
 
 //contain thread paths.
 char* currentPaths[5000];
 int static socket_descriptor;
+
+//global to each thread
+static __thread int tls_sock;
+static __thread char currentPath[2000];
 
 enum {
     FIRST = 1,

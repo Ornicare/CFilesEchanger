@@ -8,6 +8,7 @@
 #include <openssl/md5.h>
 #include "md5manager.h"
 #include <time.h>
+#include <fcntl.h>
 
 #include "crc.h"
 
@@ -62,10 +63,30 @@ int download(char *fichier,int socket) {
 	//initialisation du crc
 	crcInit();
 	
+	
+	
+	
+
+	
+	
+	
+	
+	
 	/*
 	 * On vérifie que le fichier n'exite pas déjà chez le client.
 	 */
 	if(file_exists(fichier)==1) {
+		
+		printf("&&&&&&&&%i         %i\n",getLock(fichier), getpid());
+		//On vérifie que le fichier n'est pas locké par une autre application et qu'il existe
+		if(getLock(fichier))
+		{
+			//sendCommandToServer(socket, "ABORT"); printf("WRITE : %s\n","ABORT");
+			printf("File locked\n");
+			return 2;
+		}
+		printf("&&&&&&&&%i         %i\n",setLock(fichier), getpid());
+		
 		printf("The file %s is already existing. Do you want to override it ? (O/n)\n", fichier);
 		char response[10];
 		//le %9s fera que scan ne lira que les 9 premiers char tapés. (pas de buffer overflow).
@@ -80,6 +101,8 @@ int download(char *fichier,int socket) {
 
 	}
 	
+	
+	
 	//clean_stdin(); //on vide le buffer clavier
 	
 	/*
@@ -91,20 +114,26 @@ int download(char *fichier,int socket) {
 	buffer=malloc((PACKET_SIZE+1+5)*sizeof(char));
 	morceaufichier = malloc((PACKET_SIZE+1) * sizeof(char));
 	fd=fopen(fichier,"ab");
+	//remettre le lock (saute avec le fopen)
+	setLock(fichier);
 	int octet_recu=0; //Pour vérifier que la réception s'est bien faite.
 	char taillefichier[100]; //Pour récupérer la taille du fichier
 	//Pour la barre de progression
 	int percent = 0;
 	int old_percent = 0;
 	//Gestion des crc
-	char crcPaquet[4];
+	
 	char crcPaquetServeur[5];
+	char crcPaquet[4];
 	//taille du paquet courant (le dernier n'est pas forcement 1000)
 	int current_paquet_size;
 	//Pour les stats et calculs.
 	int nb_pacquets_corrompus = 0;
 	int nb_paquets=0;
 	int k;
+	
+	
+	
 	
 	//START correspond au début du transfert.
 	sendCommandToServer(socket, "START"); printf("WRITE : %s\n","START");
@@ -160,47 +189,13 @@ int download(char *fichier,int socket) {
         	}
 		//do {
 			//réception du paquet.
-			octet_recu=read(socket, buffer, current_paquet_size+6);
+			octet_recu=read(socket, morceaufichier, current_paquet_size);
 		
 
 		
 		
-			/*
-			 * On effectue ici le prétraitement du paquet reçu. En effet il contient un 
-			 * entête de 4 octets qui contient le CRC des données.
-			 */
-			for(k = 0;k<4;k++)
-			{
-				crcPaquetServeur[k]=buffer[k];
-			}
-			crcPaquetServeur[4]='\0';
-		
-			for(k = 0;k<current_paquet_size;k++)
-			{
-				morceaufichier[k]=buffer[k+4];
-			}
-			morceaufichier[current_paquet_size]='\0';
-		
-			/*
-			 * Ensuite on calcule le crc du paquet.
-			 */
-			sprintf(crcPaquet, "%X", crcFast(morceaufichier, current_paquet_size));
-			
-			if(strcmp(crcPaquet,crcPaquetServeur)!=0 || octet_recu<0)
-			{
-				nb_pacquets_corrompus+=1;
-				printf("%i - %s - %s\n",nb_paquets,crcPaquetServeur,crcPaquet);
-				//sendCommandToServer(socket, "RETRY");
-			}
 
-		//} while(strcmp(crcPaquet,crcPaquetServeur)!=0 || octet_recu<0);
-		/*
-		 *     On compare le crc du paquet reçu par rapport au crc du paquet que l'on
-		 * est censé recevoir. Les chances de collision sont minces. Il faudrait pour
-		 * cela que le crc soit celui des données corrompues ou l'inverse.
-		 * Le paquet est redemandé si corrompu ou s'il y a eu erreur de transmission.
-		 */
-		//sendCommandToServer(socket, "CONTINUE");
+
 		fwrite(morceaufichier,current_paquet_size*sizeof(char),1,fd);
 		taille_temporaire+=current_paquet_size;
 
@@ -232,6 +227,9 @@ int download(char *fichier,int socket) {
 	printf("Débit moyen : %f\n", ((double)taille_fichier/1000000)/duration);
 	
 	
+	//unlock
+	unLock(fichier);
+	
 	/*
 	 * On vérifie si le fichier crée est à très grande probabilité le même que celui
 	 * demandé.
@@ -246,6 +244,7 @@ int download(char *fichier,int socket) {
 	{
 		printf("Fichier corrompu !\n");
 	}
+	
 	return 1; //1 => transfert échoué.
 	
 }
@@ -258,6 +257,15 @@ int min(int a, int b)
 	int tmp = a;
 	if(a>b) tmp=b;
 	return tmp;
+}
+
+
+char * toLowerCase(char * word)
+{
+	int i;
+	for (i = 0; word[i]; i++)
+	word[i] = tolower(word[i]);
+	return word;
 }
 
 	
@@ -293,7 +301,7 @@ int parseCommand(int sock, char* mesg)
 		char fileAvailable[256];
 		read(sock, fileAvailable, sizeof(fileAvailable)); printf("READERR : %s\n",fileAvailable);
 		//printf("@%s\n",fileAvailable);
-		if(strcmp(fileAvailable,"ERR:FILE_NOT_EXISTS\0")==0)
+		if(strcmp(fileAvailable,"FILE_EXIST\0"))
 		{
 			write(sock, "CONTINUE\0",9); if(DEBUG) printf("WRITE : %s\n","CONTINUE\0");
 			//printf("2%s\n",fileAvailable);
@@ -314,7 +322,8 @@ int parseCommand(int sock, char* mesg)
 	}
 	
 	
-	read(sock, buffer, sizeof(buffer)); if(DEBUG) printf("READ : %s\n",buffer);
+	memset( buffer, '\0', sizeof(buffer)); //flush the buffer
+	read(sock, buffer, sizeof(buffer)); if(DEBUG) printf("READ2 : %s\n",buffer);
 	while(strcmp(buffer,"ENDSTREAM")!=0 && strcmp(buffer,"")!=0)
 	{
 		//buffer[0]='A';
@@ -331,5 +340,63 @@ int parseCommand(int sock, char* mesg)
 	return 0;
 }
 
+int getLock(char * filePath) //0 : unlock, 1 : lock ou erreur
+{
+	/* l_type   l_whence  l_start  l_len  l_pid   */
+	struct flock fl = {F_WRLCK, SEEK_SET,   0,      0,     0 };
+	int fd;
+	fl.l_pid =getpid();
+	if ((fd = open(filePath, O_RDWR)) == -1) {
+		perror("open");
+		return 1;
+	}
+	if (fcntl(fd, F_GETLK, &fl) == -1) {
+		perror("fcntl");
+		return 1;
+	}
+	close(fd);
+	if(fl.l_type==F_UNLCK)
+	{
+		return 0;
+	}
+	
+	return 1;
+}
+
+
+
+int setLock(char * filePath)// 0 : success, 1 : error
+{
+	if(getLock(filePath)) return 1;
+	struct flock fl = {F_RDLCK, SEEK_SET,   0,      0,     0 };
+	int fd;
+	fl.l_pid = getpid();
+	if ((fd = open(filePath, O_RDWR)) == -1) {
+		perror("open");
+		return 1;
+	}
+	if (fcntl(fd, F_SETLKW, &fl) == -1) {
+		perror("fcntl");
+		return 1;
+	}
+	return 0;
+}
+
+int unLock(char * filePath)
+{
+	if(!getLock(filePath)) return 1; //the file is already unlocked
+	struct flock fl = {F_UNLCK, SEEK_SET,   0,      0,     0 };
+	int fd;
+	if ((fd = open(filePath, O_RDWR)) == -1) {
+		perror("open");
+		return 1;
+	}
+	fl.l_pid =getpid();
+	if (fcntl(fd, F_SETLK, &fl) == -1) {
+		perror("fcntl");
+		return 1;
+	}
+    	return 0;
+}
 
 
