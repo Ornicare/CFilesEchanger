@@ -108,13 +108,14 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH) { //     /!\utiliser fork ou m
 	 */
 	int k=0;
 	//printf("%i@@@@@@@@@@@@@@@@@@%s\n",sock,tls_i);
-	while(BUFFER[k]!=' ')
+	printf("sffddf\n");
+	while(BUFFER[k]!=' ' && BUFFER[k]!='\0')
 	{
 		k++;
 	}
 	BUFFER[k]='\0';
 	k++;
-	
+	printf("sffddf\n");
 	
 	
 	if(strcmp(BUFFER,"LIST")==0) //Liste le répertoire courant.
@@ -160,6 +161,60 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH) { //     /!\utiliser fork ou m
 	else if(strcmp(BUFFER,"HELP")==0) 
 	{
 		help();
+	}
+	else if(strcmp(BUFFER,"PUSH")==0)
+	{
+		char argument[256];
+		int temp_k = k;
+		while(BUFFER[k]!='\0' && k<255)
+		{
+			argument[k-temp_k]=BUFFER[k];
+			k++;
+		}
+		argument[k-temp_k]='\0';
+		
+		char filePath[1024];
+		memset( filePath, '\0', sizeof(filePath));
+	
+		strncpy(filePath,currentPath,strlen(currentPath));
+		strcat(filePath,argument);
+		
+		char temp[256];
+		
+		write(tls_sock,"SYNCHRO\0",8);  if(DEBUG) printf("WRITE : %s : %s\n","SYNCHRO\0",filePath);
+		
+		read(tls_sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
+		if(strcmp(temp,"CONTINUE\0")!=0) return 0; //Client abort
+			
+		char fileAvailable[256];
+		if(file_exists(filePath))
+		{	
+			
+		
+			write(tls_sock,"ERR:FILE_ALREADY_EXISTS\0",24);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_ALREADY_EXISTS\0",filePath);
+			
+			//Wait for client message.
+			
+			read(tls_sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
+			if(strcmp(temp,"ABORT")==0) return 0;
+			
+			remove(argument);
+
+		}
+		else
+		{
+			write(tls_sock,"ALL_OK\0",7);  if(DEBUG) printf("WRITE : %s\n","ALL_OK\0");
+			
+			//Wait for client message.
+			read(tls_sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
+		
+		}
+		
+
+		
+		printf("Dowloading the file\n");
+		download(filePath);
+		
 	}
 	return 0;
 }
@@ -563,6 +618,165 @@ int upload(char* fichier)
 	return 0;
 }
 
+int download(char *fichier) {
+	
+	//initialisation du crc
+	crcInit();
+	
+	//clean_stdin(); //on vide le buffer clavier
+	
+	/*
+	 * Déclarations
+	 */
+	FILE* fd;
+	unsigned char *buffer; //Paquet reçu.
+	unsigned char *morceaufichier; //Morceau de fichier extrait de buffer.
+	buffer=malloc((PACKET_SIZE+1+5)*sizeof(char));
+	morceaufichier = malloc((PACKET_SIZE+1) * sizeof(char));
+	fd=fopen(fichier,"ab");
+	//remettre le lock (saute avec le fopen)
+	setLock(fichier);
+	int octet_recu=0; //Pour vérifier que la réception s'est bien faite.
+	char taillefichier[100]; //Pour récupérer la taille du fichier
+	//Pour la barre de progression
+	int percent = 0;
+	int old_percent = 0;
+	//Gestion des crc
+	
+	char crcPaquetServeur[5];
+	char crcPaquet[4];
+	//taille du paquet courant (le dernier n'est pas forcement 1000)
+	int current_paquet_size;
+	//Pour les stats et calculs.
+	int nb_pacquets_corrompus = 0;
+	int nb_paquets=0;
+	int k;
+	
+	
+	
+	
+	//START correspond au début du transfert.
+	sendCommandToClient("START"); printf("WRITE : %s\n","START");
+
+	//On récupère la taille du fichier. Si ceci échoue, le reste est vain.
+	read(tls_sock, taillefichier, sizeof(taillefichier)); if(DEBUG) printf("READ : %s\n",taillefichier);
+	int taille_fichier=atoi(taillefichier);
+	
+	//CONTINUE permet au serveur de savoir que l'on a bien reçu le paquet, ceci avant de lancer le reste.
+	sendCommandToClient("CONTINUE"); if(DEBUG) printf("WRITE : %s\n","CONTINUE");
+
+	
+	printf("Taille du fichier : %s o\n",taillefichier);
+	printf("__________________________________________________\n");
+	
+	fseek(fd, 0, SEEK_SET);
+	int taille_temporaire=ftell(fd);
+
+	/*
+	 * Lecture du md5 du fichier que l'on va recevoir.
+	 */
+	char bufferMD5[33]; //md5 envoyé par le serveur
+	read(tls_sock, bufferMD5, 33); if(DEBUG) printf("READ : %s\n",bufferMD5);
+
+	sendCommandToClient("CONTINUE"); if(DEBUG) printf("WRITE : %s\n","CONTINUE");
+	
+	time_t start, end;
+	double duration = 0;
+	
+	time(&start);
+
+	while(taille_temporaire<taille_fichier)
+	{
+		//printf("%i/%d\n",nb_paquets,(int)(((double)(taille_fichier))/((double)(PACKET_SIZE))));
+		nb_paquets+=1;
+		current_paquet_size=min(PACKET_SIZE, taille_fichier-taille_temporaire);
+
+
+		/*
+		 * Gestion de la barre de progression
+		 */
+		percent = (int)((50*(double)taille_temporaire)/((double)taille_fichier));
+        	if(percent>old_percent)
+        	{
+        		
+        		for(k = old_percent;k<percent;k++)
+        		{
+        		        printf("=");
+        			fflush(stdout); //On force stdout à se rafraichir.
+        		}
+
+        		old_percent = percent;
+        	}
+		//do {
+			//réception du paquet.
+			octet_recu=read(tls_sock, morceaufichier, current_paquet_size);
+		
+
+		
+		
+
+
+		fwrite(morceaufichier,current_paquet_size*sizeof(char),1,fd);
+		taille_temporaire+=current_paquet_size;
+
+	}
+	
+	time(&end);
+	for(k = percent;k<50;k++)
+	{
+	        printf("=");
+		fflush(stdout); //On force stdout à se rafraichir.
+	}
+	printf("\n"); //(Juste pour terminer la progress bar)
+	//fermeture du fichier
+	fclose(fd);
+	
+	//Libération de la ram allouée au début.
+	free(morceaufichier);
+	free(buffer);
+
+	//Quelques infos sur le transfert.
+	printf("Corrompus : %i/%i\n",nb_pacquets_corrompus,nb_paquets);
+	
+	//On récupère le md5 du fichier reçu.
+	char bufferT[33];
+    	getMD5checkSum(fichier, bufferT); 
+	
+	duration = difftime(end,start);
+	
+	printf("Débit moyen : %f\n", ((double)taille_fichier/1000000)/duration);
+	
+	
+	//unlock
+	//unLock(fichier);
+	
+	/*
+	 * On vérifie si le fichier crée est à très grande probabilité le même que celui
+	 * demandé.
+	 */
+	printf("Serveur : %s\nClient : %s\n",bufferMD5,bufferT);
+	if(strcmp(bufferMD5,bufferT)==0)
+	{
+		printf("Fichier reçu correctement.\n");
+		return 0; //0 => transfert réussi.
+	}
+	else
+	{
+		printf("Fichier corrompu !\n");
+	}
+	
+	return 1; //1 => transfert échoué.
+	
+}
+
+
+int sendCommandToClient(char* commande)
+{
+	char commandReader[10];
+    	sprintf(commandReader, "%s", commande);
+	write(tls_sock, commandReader, sizeof(commandReader));
+}
+
 /*
  * Attend le message 'commande' de la part du client, annule l'upload si reçoit autre chose.
  */
@@ -642,7 +856,7 @@ int getLock(char * filePath) //0 : unlock, 1 : lock ou erreur
 int setLock(char * filePath)// 0 : success, 1 : error
 {
 	if(getLock(filePath)) return 1;
-	struct flock fl = {F_RDLCK, SEEK_SET,   0,      0,     0 };
+	struct flock fl = {F_WRLCK, SEEK_SET,   0,      0,     0 };
 	int fd;
 	fl.l_pid = getpid();
 	if ((fd = open(filePath, O_RDWR)) == -1) {

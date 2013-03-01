@@ -1,6 +1,8 @@
 int parseCommand(char* BUFFER, int BUFFER_LENGTH);
 int help();
+int download(char* fichier);
 int cdDown(char* argument);
+int sendCommandToClient(char * message);
 void list();
 void pwd();
 //void cdUp();

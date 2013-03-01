@@ -320,6 +320,59 @@ int parseCommand(int sock, char* mesg)
 		}
 		//write(sock,"OK\0",3);
 	}
+	else if(strcmp(buffer,"PUSH")==0)
+	{
+		char argument[256];
+		int temp_k = k;
+		char temp[256];
+		while(buffer[k]!='\0' && k<255)
+		{
+			argument[k-temp_k]=buffer[k];
+			k++;
+		}
+		argument[k-temp_k]='\0';
+		
+		//synchro
+		read(sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
+		
+		if(!file_exists(argument))
+		{
+			printf("File doesn't exists\n");
+			write(sock, "ABORT\0",6); if(DEBUG) printf("WRITE : %s\n","ABORT\0");
+			return 3;
+		}
+		
+		write(sock, "CONTINUE\0",9); if(DEBUG) printf("WRITE : %s\n","CONTINUE\0");
+		
+		
+		
+		read(sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
+		
+		if(strcmp(temp,"ERR:FILE_ALREADY_EXISTS")==0)
+		{
+			printf("The file %s is already existing. Do you want to override it ? (O/n)\n", argument);
+			char response[10];
+			//le %9s fera que scan ne lira que les 9 premiers char tapés. (pas de buffer overflow).
+			if ( scanf ( "%9s", response ) != 1 ) 
+	 			return 1; //2 => transfert échoué (ici le scanf).
+			if(strcmp(response,"O")!=0 && strcmp(response,"o")!=0)
+			{
+				clean_stdin(); //on vide le buffer clavier
+				write(sock, "ABORT\0",6); if(DEBUG) printf("WRITE : %s\n","ABORT\0");
+				read(sock, buffer, sizeof(buffer)); if(DEBUG) printf("READ : %s\n",buffer);
+				return 2; //2 => transfert annulé.
+			}
+			clean_stdin();
+		}
+		
+		write(sock, "ERASE\0",6); if(DEBUG) printf("WRITE : %s\n","ERASE\0");
+		
+		printf("Uploading the file\n");
+		upload(argument,sock);
+
+		
+		
+	}
 	
 	
 	memset( buffer, '\0', sizeof(buffer)); //flush the buffer
@@ -336,6 +389,126 @@ int parseCommand(int sock, char* mesg)
 	//
 	char temp[256];
 	//read(sock,temp,sizeof(temp)); printf("READ : %s\n",temp);
+
+	return 0;
+}
+
+/*
+ * Attend le message 'commande' de la part du server, annule l'upload si reçoit autre chose.
+ */
+int waitingForServerMessage(int sock, char* commande)
+{
+	char commandReader[10];
+	read(sock, commandReader, sizeof(commandReader)); if(DEBUG) printf("READ : %s\n",commandReader);
+	if(strcmp(commandReader,commande)!=0)
+	{
+		printf("Erreur protocolaire\n");
+		return 1;
+	}
+	return 0;
+}
+
+int upload(char *fichier,int sock)
+{
+	/*
+	 * Déclarations
+	 */
+	FILE *fs = fopen(fichier, "rb"); //Le fichier à envoyer. //rb ouverture du fichier en lecture binaire
+	
+	//remettre le lock
+	//printf("0=Lock placé : %i\n",setLock(fichier));
+	
+	int octet_envoye; //Pour vérifier que l'envoi s'est bien fait.
+	int taille_fichier;
+	unsigned char *buffer; //Le paquet qui va être envoyé
+	unsigned char *morceaufichier; //Morceau de fichier mit dans buffer.
+	//allocations mémoire
+	morceaufichier = malloc((PACKET_SIZE+1) * sizeof(char));
+	buffer = malloc((PACKET_SIZE+1+5) * sizeof(char)); //buff sera la taille d'un fragment de fichier + le crc.
+	
+	//indicateurs de lecture
+	int taille_lue;
+	int taille_temporaire;
+	//deux trois trucs
+	char tailleFichier[100]; //pour gérer la taille du fichier
+	char commandReader[10]; //reception des commandes serveur.
+	char bufferT[33]; //stockera le md5 du fichier.
+	char crcPaquetServeur[5]; //stockera le CRC du morceau de fichier (mis au début de buffer)
+	int current_paquet_size; //taille du paquet courant.
+	int nb_paquets = 0; //le nombre de paquets corrects envoyés.
+	//gestion de la progress bar
+	int percent = 0;
+	int old_percent = 0;
+	//Pour le calcul.
+	int k;
+	
+	//Calcul de la taille du fichier.
+	fseek(fs, 0, SEEK_END); //déplace le curseur de lecture du fichier de 0 octets par rapport à la fin du fichier
+	taille_fichier =  ftell(fs); //ftell : position actuelle du curseur.
+	
+
+	//Initialisation des indicateurs de lecture.
+	fseek(fs, 0, SEEK_SET); //on place le curseur au début.
+	taille_temporaire = ftell(fs);
+	taille_lue=0;
+	
+	//On met la taille dans un buffer
+	sprintf(tailleFichier, "%i", taille_fichier);
+	
+	//On attend START de la part du serveur.
+	if(waitingForServerMessage(sock,"START")) return 1;
+	
+	//envoi de la taille du fichier au client
+	write(sock, tailleFichier, sizeof(tailleFichier)); if(DEBUG) printf("WRITE : %s\n",tailleFichier);
+
+	//réception de CONTINUE.
+	if(waitingForServerMessage(sock,"CONTINUE")) return 1;
+	//envoi du md5 du fichier
+	
+	getMD5checkSum(fichier, bufferT); //md5 du fichier envoyé.
+	write(sock, bufferT, sizeof(bufferT));  if(DEBUG) printf("WRITE : %s\n",bufferT);
+
+	if(waitingForServerMessage(sock,"CONTINUE")) return 1;
+	
+
+	printf("__________________________________________________\n");
+	
+	while  (taille_lue<taille_fichier)
+	{
+		nb_paquets+=1; //On compte le nombre de paquets
+		current_paquet_size=min(PACKET_SIZE,taille_fichier-taille_lue); //la taille du paquet courant
+		fread(morceaufichier,PACKET_SIZE,1,fs); //lecture du bloc de fichier.
+
+		octet_envoye=write(sock, morceaufichier, min(PACKET_SIZE,taille_fichier-taille_lue));
+			
+		/*
+		 * Gestion de la progress bar.
+		 */
+		percent = (int)((50*(double)taille_temporaire)/((double)taille_fichier));
+		if(percent>old_percent)
+		{
+			for(k = old_percent;k<percent;k++)
+			{
+				printf("=");
+				fflush(stdout); //On force stdout à se rafraichir.
+			}
+
+			old_percent = percent;
+		}
+
+		taille_lue+=PACKET_SIZE; //Pour calculer la taille du paquet courant.
+	}
+	for(k = percent;k<50;k++)
+	{
+		printf("=");
+		fflush(stdout); //On force stdout à se rafraichir.
+	}
+	printf("\n"); //(Juste pour terminer la progress bar)
+	free(morceaufichier);
+	free(buffer);
+	
+	//unlock the file
+	//unLock(fichier);
 
 	return 0;
 }
@@ -368,7 +541,7 @@ int getLock(char * filePath) //0 : unlock, 1 : lock ou erreur
 int setLock(char * filePath)// 0 : success, 1 : error
 {
 	if(getLock(filePath)) return 1;
-	struct flock fl = {F_RDLCK, SEEK_SET,   0,      0,     0 };
+	struct flock fl = {F_WRLCK, SEEK_SET,   0,      0,     0 };
 	int fd;
 	fl.l_pid = getpid();
 	if ((fd = open(filePath, O_RDWR)) == -1) {

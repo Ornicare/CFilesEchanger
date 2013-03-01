@@ -89,6 +89,7 @@ int main(int argc, char** argv)
 	char message[256];
 	while(strcmp(message,"STOP")!=0)
 	{
+		memset( message, '\0', sizeof(message));
 		printf("Entrez votre commande\n");
 		//if ( scanf ( "%255s", message ) == 1 ) //scanf arrête la lecture au premier char d'espacement........
 		if(fgets(message, sizeof(message), stdin)!=NULL)
