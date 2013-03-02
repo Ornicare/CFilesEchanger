@@ -20,13 +20,19 @@ int getLock(char * filePath);
 int setLock(char * filePath);
 int unLock(char * filePath);
 
-//contain thread paths.
-char* currentPaths[5000];
+int getLocked(char * filePath);
+int setLocked(char * filePath);
+int unLocked(char * filePath);
+
+
 int static socket_descriptor;
 
 //global to each thread
 static __thread int tls_sock;
 static __thread char currentPath[2000];
+
+//Can download 10000 files atthe same time
+char * lockedFiles[10000];
 
 enum {
     FIRST = 1,

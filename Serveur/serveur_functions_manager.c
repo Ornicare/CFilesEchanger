@@ -21,7 +21,7 @@
 #define PACKET_SIZE 1 //pas plus, ça passe pas
 #define DEBUG 1
 
-pthread_rwlock_t rwlock;
+
 
 /**************************************/
 
@@ -187,16 +187,36 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH) { //     /!\utiliser fork ou m
 		if(strcmp(temp,"CONTINUE\0")!=0) return 0; //Client abort
 			
 		char fileAvailable[256];
+		
+		if(getLocked(filePath)!=0)
+		{
+			write(tls_sock,"ERR:FILE_ALREADY_IN_USE\0",24);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_ALREADY_IN_USE\0",filePath);
+			
+			//Wait for client message.
+			
+			read(tls_sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
+			return 0;
+		}
+		
+		
+		
 		if(file_exists(filePath))
 		{	
 			
-		
+			//lock the file
+			setLocked(filePath);
+			
+			
 			write(tls_sock,"ERR:FILE_ALREADY_EXISTS\0",24);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_ALREADY_EXISTS\0",filePath);
 			
 			//Wait for client message.
 			
 			read(tls_sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
-			if(strcmp(temp,"ABORT")==0) return 0;
+			if(strcmp(temp,"ABORT")==0)
+			{
+				unLocked(filePath);
+				return 0;
+			}
 			
 			remove(argument);
 
@@ -210,10 +230,11 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH) { //     /!\utiliser fork ou m
 		
 		}
 		
-
+		
 		
 		printf("Dowloading the file\n");
 		download(filePath);
+		unLocked(filePath);
 		
 	}
 	return 0;
@@ -221,7 +242,7 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH) { //     /!\utiliser fork ou m
 
 int help()
 {
-	char * help = "CDUP: go to the parent directory\nCDDOWN <directory>: go to <directory>\nPWD: get the current directory\nLIST: get files and directories in the current directory\nGET <file>: try to download <file>\n";
+	char * help = "CDUP: go to the parent directory\nCDDOWN <directory>: go to <directory>\nPWD: get the current directory\nLIST: get files and directories in the current directory\nGET <file>: try to download <file>\nPUSH <file>: try to push <file> on the working directory on the server.\n";
 	write(tls_sock,help, strlen(help));
 	waitingForClientMessage("CONTINUE");
 	return 0;
@@ -402,11 +423,12 @@ int uploadManager(char* argument)
 	
 	//Attention get lock avant le file_exist (fait sauter le lock)
 	printf("@@@@@@@@@@@@@@@@@@@@%i\n",getLock(filePath));
-	if(getLock(filePath))
+	if(getLock(filePath) || getLocked(filePath))
 	{
 		write(tls_sock,"ERR:FILE_ALREADY_IN_USE\0",24);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_ALREADY_IN_USE\0",filePath);
 		return 1;
 	}
+
 	
 	if(!file_exists(filePath))
 	{	
@@ -416,12 +438,14 @@ int uploadManager(char* argument)
 		return 1;
 	}
 	
-
+	//get the lock
+	setLocked(filePath);
 	
 	
 	//setLock(filePath);
 	//printf("@@@@@@@@@@@@@@@@@@@@%i\n",getLock(filePath));
 	write(tls_sock,"FILE_EXIST\0",11);  if(DEBUG) printf("WRITE : %s\n","FILE_EXIST\0");
+	
 	
 	//char temp[256];
 	//read(sock,temp,sizeof(temp));
@@ -512,19 +536,30 @@ int upload(char* fichier)
 	sprintf(tailleFichier, "%i", taille_fichier);
 	
 	//On attend START de la part du client.
-	if(waitingForClientMessage("START")) return 1;
-	
+	if(waitingForClientMessage("START"))
+	{
+		unLocked(fichier);
+		return 1;
+	}
 	//envoi de la taille du fichier au client
 	write(tls_sock, tailleFichier, sizeof(tailleFichier)); if(DEBUG) printf("WRITE : %s\n",tailleFichier);
 
 	//réception de CONTINUE.
-	if(waitingForClientMessage("CONTINUE")) return 1;
+	if(waitingForClientMessage("CONTINUE"))
+	{
+		unLocked(fichier);
+		return 1;
+	}
 	//envoi du md5 du fichier
 	
 	getMD5checkSum(fichier, bufferT); //md5 du fichier envoyé.
 	write(tls_sock, bufferT, sizeof(bufferT));  if(DEBUG) printf("WRITE : %s\n",bufferT);
 
-	if(waitingForClientMessage("CONTINUE")) return 1;
+	if(waitingForClientMessage("CONTINUE"))
+	{
+		unLocked(fichier);
+		return 1;
+	}
 	
 
 	printf("__________________________________________________\n");
@@ -588,7 +623,7 @@ int upload(char* fichier)
 		/*
 		 * Gestion de la progress bar.
 		 */
-		percent = (int)((50*(double)taille_temporaire)/((double)taille_fichier));
+		percent = (int)((50*(double)taille_lue)/((double)taille_fichier));
 		if(percent>old_percent)
 		{
 			for(k = old_percent;k<percent;k++)
@@ -614,6 +649,7 @@ int upload(char* fichier)
 	
 	//unlock the file
 	unLock(fichier);
+	unLocked(fichier);
 
 	return 0;
 }
@@ -748,7 +784,7 @@ int download(char *fichier) {
 	
 	
 	//unlock
-	//unLock(fichier);
+	unLock(fichier);
 	
 	/*
 	 * On vérifie si le fichier crée est à très grande probabilité le même que celui
@@ -885,4 +921,51 @@ int unLock(char * filePath)
 		return 1;
 	}
     	return 0;
+}
+
+
+
+
+int getLocked(char * filePath) //0 : unlock, sinon : lock
+{
+	int k = 0;
+	while(strcmp(lockedFiles[k],"\r")!=0 && strcmp(lockedFiles[k],filePath)!=0)
+	{
+		k++;
+	}
+	return strcmp(lockedFiles[k],"\r");
+}
+
+
+
+int setLocked(char * filePath)// 0 : success, 1 : error
+{
+	int k = 0;
+	while(strcmp(lockedFiles[k],"\r")!=0 && strcmp(lockedFiles[k],"\0")!=0)
+	{
+		k++;
+	}
+	
+	lockedFiles[k] = filePath;
+	if(strcmp(lockedFiles[k],"\r")!=0)
+	{
+		lockedFiles[k+1] = "\r";
+	}
+	
+	return 1;
+}
+
+int unLocked(char * filePath)
+{
+	int k = 0;
+	while(strcmp(lockedFiles[k],"\r")!=0 && strcmp(lockedFiles[k],filePath)!=0)
+	{
+		k++;
+	}
+	lockedFiles[k]="\0";
+	if(strcmp(lockedFiles[k+1],"\r")!=0)
+	{
+		lockedFiles[k] = "\r";
+	}
+	return 1;
 }

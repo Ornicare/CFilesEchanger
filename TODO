@@ -1,0 +1,28 @@
+TODO
+
+//server : répertoire courant.... = le même ! pourchaque client
+//help
+fct d'upload
+mkdir
+et vis versa
+
+del file/dir
+
+lock sur les fichiers.
+ - en lecture : pas besoin
+ - en écriture client : fait
+ - en écriture serveur... les threads ont le mem pid....
+
+//Le dir des clients est stocké dans une pile de 5000.... => __thread
+
+
+
+http://linux.about.com/library/cmd/blcmdl2_pread.htm
+
+
+///////////////////////
+Extensions : 
+
+Navigation dans les dossiers côté client : actuellement seul le dossier de lancement de l'application est atteignable.
+
+Lancer les opérations sur les fichiers dans des threads côté client => ne pas bloquer le client.

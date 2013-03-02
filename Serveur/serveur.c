@@ -28,7 +28,6 @@ typedef struct servent servent;
 /**************************************/
 //int static socket_descriptor;
 
-pthread_key_t tlsKey = 0;
 
 /**************************************/
 
@@ -42,8 +41,10 @@ pthread_key_t tlsKey = 0;
 int main(int argc, char** argv)
 {
 
-
-
+	//initialisation des locks
+	memset(lockedFiles,'\0',sizeof(lockedFiles));
+	lockedFiles[0] = "\r"; //fin de la liste
+	
   
 	int port; //Le port qui va être utilisé.
 	int nouv_socket_descriptor,

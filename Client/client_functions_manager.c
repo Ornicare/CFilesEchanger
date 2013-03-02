@@ -348,6 +348,13 @@ int parseCommand(int sock, char* mesg)
 		
 		read(sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n",temp);
 		
+		if(strcmp(temp,"ERR:FILE_ALREADY_IN_USE")==0)
+		{
+			write(sock, "ABORT\0",6); if(DEBUG) printf("WRITE : %s\n","ABORT\0");
+			read(sock, buffer, sizeof(buffer)); if(DEBUG) printf("READ : %s\n",buffer);
+			return 2;
+		}
+
 		if(strcmp(temp,"ERR:FILE_ALREADY_EXISTS")==0)
 		{
 			printf("The file %s is already existing. Do you want to override it ? (O/n)\n", argument);
@@ -484,7 +491,7 @@ int upload(char *fichier,int sock)
 		/*
 		 * Gestion de la progress bar.
 		 */
-		percent = (int)((50*(double)taille_temporaire)/((double)taille_fichier));
+		percent = (int)((50*(double)taille_lue)/((double)taille_fichier));
 		if(percent>old_percent)
 		{
 			for(k = old_percent;k<percent;k++)
