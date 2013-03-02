@@ -339,6 +339,7 @@ int parseCommand(int sock, char* mesg)
 		{
 			printf("File doesn't exists\n");
 			write(sock, "ABORT\0",6); if(DEBUG) printf("WRITE : %s\n","ABORT\0");
+			read(sock, buffer, sizeof(buffer)); if(DEBUG) printf("READ : %s\n",buffer);
 			return 3;
 		}
 		

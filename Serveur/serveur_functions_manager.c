@@ -425,7 +425,9 @@ int uploadManager(char* argument)
 	printf("@@@@@@@@@@@@@@@@@@@@%i\n",getLock(filePath));
 	if(getLock(filePath) || getLocked(filePath))
 	{
-		write(tls_sock,"ERR:FILE_ALREADY_IN_USE\0",24);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_ALREADY_IN_USE\0",filePath);
+		write(tls_sock,"ERR:FILE_ALREADY_IN_USE_OR_NOT_EXISTS\0",39);  if(DEBUG) printf("WRITE : %s : %s\n","ERR:FILE_ALREADY_IN_USE_OR_NOT_EXISTS\0",filePath);
+		char temp[256];
+		read(tls_sock,temp,sizeof(temp)); if(DEBUG) printf("READ : %s\n","temp");
 		return 1;
 	}
 
@@ -957,15 +959,21 @@ int setLocked(char * filePath)// 0 : success, 1 : error
 
 int unLocked(char * filePath)
 {
+	printf("1\n");
 	int k = 0;
 	while(strcmp(lockedFiles[k],"\r")!=0 && strcmp(lockedFiles[k],filePath)!=0)
 	{
 		k++;
 	}
+	printf("1\n");
 	lockedFiles[k]="\0";
-	if(strcmp(lockedFiles[k+1],"\r")!=0)
+	printf("1\n");
+	/*if(strcmp(lockedFiles[k+1],"\r")!=0)
 	{
+		printf("2\n");
 		lockedFiles[k] = "\r";
-	}
+		printf("2\n");
+	}*/
+	printf("1\n");
 	return 1;
 }
