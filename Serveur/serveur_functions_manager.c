@@ -158,6 +158,25 @@ int parseCommand(char* BUFFER, int BUFFER_LENGTH) { //     /!\utiliser fork ou m
 	{
 		cdUp();
 	}
+	else if(strcmp(BUFFER,"MKDIR")==0) 
+	{
+		char argument[256];
+		int temp_k = k;
+		while(BUFFER[k]!='\0' && k<255)
+		{
+			argument[k-temp_k]=BUFFER[k];
+			k++;
+		}
+		argument[k-temp_k]='\0';
+		
+		char filePath[1024];
+		memset( filePath, '\0', sizeof(filePath));
+	
+		strncpy(filePath,currentPath,strlen(currentPath));
+		strcat(filePath,argument);
+		
+		mkdir(filePath,0777);
+	}
 	else if(strcmp(BUFFER,"HELP")==0) 
 	{
 		help();
